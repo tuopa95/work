@@ -1,0 +1,6 @@
+{
+  "name": "AI 团队报销收集系统",
+  "description": "一款简洁、美观、功能完备的团队报销收集系统，支持员工端多图追加、拖拽、分类上传，以及管理员后台分组查看、高级搜索、多维统计和 Excel 导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
