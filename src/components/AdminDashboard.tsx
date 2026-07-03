@@ -57,6 +57,51 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
+  // Custom Confirmation & Alert Modals state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void | Promise<void>;
+    isDanger?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type?: 'success' | 'error' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info'
+  });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void | Promise<void>, isDanger = false) => {
+    setConfirmModal({
+      isOpen: true,
+      title,
+      message,
+      onConfirm,
+      isDanger
+    });
+  };
+
+  const showAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setAlertModal({
+      isOpen: true,
+      title,
+      message,
+      type
+    });
+  };
+
   const handleUpdateCategory = async (attachmentId: string, newCategory: string) => {
     setUpdatingCategory(true);
     try {
@@ -89,55 +134,61 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
           setSelectedAttachment({ ...selectedAttachment, category: newCategory });
         }
       } else {
-        alert(data.error || '更新分类失败');
+        showAlert('更新失败', data.error || '更新分类失败', 'error');
       }
     } catch (err) {
       console.error(err);
-      alert('更新分类失败，网络异常');
+      showAlert('网络异常', '更新分类失败，网络异常', 'error');
     } finally {
       setUpdatingCategory(false);
     }
   };
 
   const handleDeleteExpense = async (id: string) => {
-    if (!window.confirm('确认要删除这条报销明细记录吗？此操作不可恢复。')) return;
-
-    try {
-      const res = await fetch(`/api/admin/expense/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setExpenses(prev => prev.filter(entry => entry.id !== id));
-      } else {
-        alert(data.error || '删除记录失败');
+    showConfirm('确认要删除这条报销明细记录吗？', '此操作不可恢复。确认后该条报销及其凭证记录将从系统永久移除。', async () => {
+      try {
+        const res = await fetch(`/api/admin/expense/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+          setExpenses(prev => prev.filter(entry => entry.id !== id));
+          showAlert('删除成功', '已成功删除该条报销记录！', 'success');
+        } else {
+          showAlert('删除失败', data.error || '删除记录失败', 'error');
+        }
+      } catch (err) {
+        console.error(err);
+        showAlert('网络异常', '删除记录失败，网络异常', 'error');
       }
-    } catch (err) {
-      console.error(err);
-      alert('删除记录失败，网络异常');
-    }
+    }, true);
   };
 
   const handleClearAllExpenses = async () => {
-    if (!window.confirm('⚠️ 警告：确认要清除所有的报销记录吗？此操作将彻底清空所有已保存的报销数据，且不可恢复！')) return;
-
-    try {
-      const res = await fetch('/api/admin/expenses/clear', {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setExpenses([]);
-        alert('已成功清除所有报销记录！');
-      } else {
-        alert(data.error || '清除记录失败');
-      }
-    } catch (err) {
-      console.error(err);
-      alert('清除记录失败，网络异常');
-    }
+    showConfirm(
+      '⚠️ 警告：确认要清除所有的报销记录吗？',
+      '此操作将彻底清空所有已保存的报销数据，且完全不可恢复！请务必确认！',
+      async () => {
+        try {
+          const res = await fetch('/api/admin/expenses/clear', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          const data = await res.json();
+          if (data.success) {
+            setExpenses([]);
+            showAlert('清除成功', '已成功清除所有报销记录！', 'success');
+          } else {
+            showAlert('清除失败', data.error || '清除记录失败', 'error');
+          }
+        } catch (err) {
+          console.error(err);
+          showAlert('网络异常', '清除记录失败，网络异常', 'error');
+        }
+      },
+      true
+    );
   };
 
   // Fetch data
@@ -176,23 +227,24 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
 
   // Handle Feedback Deletion / Resolve
   const handleResolveFeedback = async (id: string) => {
-    if (!window.confirm('确认已解决此问题反馈并将其归档吗？')) return;
-
-    try {
-      const res = await fetch(`/api/admin/feedback/${id}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFeedbacks(prev => prev.filter(fb => fb.id !== id));
-      } else {
-        alert('操作失败');
+    showConfirm('确认解决反馈吗？', '确认已解决此问题反馈并将其归档吗？归档后该反馈将从待办列表中移出。', async () => {
+      try {
+        const res = await fetch(`/api/admin/feedback/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (data.success) {
+          setFeedbacks(prev => prev.filter(fb => fb.id !== id));
+          showAlert('解决成功', '该反馈已被成功归档！', 'success');
+        } else {
+          showAlert('操作失败', '处理反馈失败，请重试', 'error');
+        }
+      } catch (err) {
+        console.error(err);
+        showAlert('网络连接错误', '处理反馈失败，网络连接异常', 'error');
       }
-    } catch (err) {
-      console.error(err);
-      alert('网络连接错误');
-    }
+    });
   };
 
   // Filter Logic
@@ -244,7 +296,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
   // Export to Excel with inline images via MHTML format
   const handleExportExcel = async () => {
     if (filteredExpenses.length === 0) {
-      alert('当前筛选条件下没有可导出的数据');
+      showAlert('无法导出', '当前筛选条件下没有可导出的数据', 'info');
       return;
     }
 
@@ -496,19 +548,42 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       parts.push(`--${boundary}--`);
 
       const mhtmlString = joinLines(parts);
+      
+      // Calculate dates and total amount for custom naming
+      const expenseDates = filteredExpenses
+        .map(e => e.expense_date)
+        .filter(Boolean)
+        .sort();
+
+      let dateStr = '';
+      if (expenseDates.length > 0) {
+        const minDate = expenseDates[0];
+        const maxDate = expenseDates[expenseDates.length - 1];
+        if (minDate === maxDate) {
+          dateStr = minDate;
+        } else {
+          dateStr = `${minDate}至${maxDate}`;
+        }
+      } else {
+        dateStr = new Date().toISOString().split('T')[0];
+      }
+
+      const totalSum = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+      const amountStr = `¥${totalSum.toFixed(2)}`;
+      const fileName = `团队报销汇总_${dateStr}_${amountStr}.xls`;
 
       const blob = new Blob([mhtmlString], { type: 'application/vnd.ms-excel;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.href = url;
-      link.setAttribute('download', `团队报销导出汇总_${new Date().toISOString().split('T')[0]}.xls`);
+      link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
 
     } catch (error) {
       console.error('Error during excel export:', error);
-      alert('导出失败，请重试');
+      showAlert('导出失败', '导出 Excel 失败，请重试', 'error');
     } finally {
       setIsExporting(false);
     }
@@ -516,7 +591,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
 
   const handleExportPdf = async () => {
     if (filteredExpenses.length === 0) {
-      alert('当前筛选条件下没有可导出的数据');
+      showAlert('无法导出', '当前筛选条件下没有可导出的数据', 'info');
       return;
     }
 
@@ -666,13 +741,36 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       }
 
       if (doc) {
-        doc.save(`reimbursement_attachments_${Date.now()}.pdf`);
+        // Calculate dates and total amount for custom naming
+        const expenseDates = filteredExpenses
+          .map(e => e.expense_date)
+          .filter(Boolean)
+          .sort();
+
+        let dateStr = '';
+        if (expenseDates.length > 0) {
+          const minDate = expenseDates[0];
+          const maxDate = expenseDates[expenseDates.length - 1];
+          if (minDate === maxDate) {
+            dateStr = minDate;
+          } else {
+            dateStr = `${minDate}至${maxDate}`;
+          }
+        } else {
+          dateStr = new Date().toISOString().split('T')[0];
+        }
+
+        const totalSum = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+        const amountStr = `¥${totalSum.toFixed(2)}`;
+        const pdfFileName = `团队报销图片_${dateStr}_${amountStr}.pdf`;
+
+        doc.save(pdfFileName);
       } else {
-        alert('没有可以导出的有效图片！');
+        showAlert('无法导出', '没有可以导出的有效图片！', 'info');
       }
     } catch (err) {
       console.error('Failed to export PDF:', err);
-      alert('生成 PDF 失败，请重试');
+      showAlert('导出失败', '生成 PDF 失败，请重试', 'error');
     } finally {
       setIsExportingPdf(false);
     }
@@ -1381,6 +1479,91 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                   <span>正在同步修改至服务器...</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Custom Confirmation Modal */}
+      {confirmModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full border border-slate-150 dark:border-zinc-800 shadow-2xl p-6 relative animate-scale-up space-y-4">
+            <div className="flex items-start gap-3">
+              <div className={`p-2.5 rounded-xl ${confirmModal.isDanger ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-950/20 dark:text-blue-400'}`}>
+                <HelpCircle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  {confirmModal.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed">
+                  {confirmModal.message}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                  await confirmModal.onConfirm();
+                }}
+                className={`px-4 py-2 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98 cursor-pointer ${
+                  confirmModal.isDanger
+                    ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/10'
+                    : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/10'
+                }`}
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Alert Modal */}
+      {alertModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-sm w-full border border-slate-150 dark:border-zinc-800 shadow-2xl p-6 relative animate-scale-up space-y-4">
+            <div className="flex items-start gap-3">
+              <div className={`p-2.5 rounded-xl ${
+                alertModal.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/20 dark:text-emerald-400'
+                  : alertModal.type === 'error'
+                  ? 'bg-rose-50 text-rose-600 dark:bg-rose-950/20 dark:text-rose-400'
+                  : 'bg-blue-50 text-blue-600 dark:bg-blue-950/20 dark:text-blue-400'
+              }`}>
+                {alertModal.type === 'success' ? (
+                  <CheckCircle className="w-6 h-6" />
+                ) : alertModal.type === 'error' ? (
+                  <X className="w-6 h-6" />
+                ) : (
+                  <HelpCircle className="w-6 h-6" />
+                )}
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                  {alertModal.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed">
+                  {alertModal.message}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                我知道了
+              </button>
             </div>
           </div>
         </div>

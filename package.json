@@ -9,6 +9,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@google/genai": "^2.10.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "jspdf": "^4.2.1",

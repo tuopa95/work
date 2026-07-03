@@ -5,8 +5,9 @@ import { fileURLToPath } from 'url';
 import cors from 'cors';
 import * as vite from 'vite';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const resolvedDirname = typeof __dirname !== 'undefined'
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 const PORT = 3000;
@@ -19,7 +20,9 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Ensure data directories exist
-const DATA_DIR = path.join(__dirname, 'data');
+const isVercel = !!process.env.VERCEL;
+const SOURCE_DATA_DIR = path.join(resolvedDirname, 'data');
+const DATA_DIR = isVercel ? path.join('/tmp', 'data') : SOURCE_DATA_DIR;
 const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const EXPENSES_FILE = path.join(DATA_DIR, 'expenses.json');
 const FEEDBACK_FILE = path.join(DATA_DIR, 'feedback.json');
@@ -30,6 +33,28 @@ if (!fs.existsSync(DATA_DIR)) {
 if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
+
+// On Vercel, copy initial JSON database files from read-only directory to /tmp
+if (isVercel) {
+  const sourceExpensesFile = path.join(SOURCE_DATA_DIR, 'expenses.json');
+  const sourceFeedbackFile = path.join(SOURCE_DATA_DIR, 'feedback.json');
+
+  if (!fs.existsSync(EXPENSES_FILE) && fs.existsSync(sourceExpensesFile)) {
+    try {
+      fs.copyFileSync(sourceExpensesFile, EXPENSES_FILE);
+    } catch (e) {
+      console.error('Failed to copy expenses seed file:', e);
+    }
+  }
+  if (!fs.existsSync(FEEDBACK_FILE) && fs.existsSync(sourceFeedbackFile)) {
+    try {
+      fs.copyFileSync(sourceFeedbackFile, FEEDBACK_FILE);
+    } catch (e) {
+      console.error('Failed to copy feedback seed file:', e);
+    }
+  }
+}
+
 if (!fs.existsSync(EXPENSES_FILE)) {
   fs.writeFileSync(EXPENSES_FILE, JSON.stringify([], null, 2), 'utf-8');
 }
@@ -189,11 +214,17 @@ app.post('/api/admin/login', (req, res) => {
 
 // Token Verification Middleware
 const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  const authHeader = req.headers.authorization;
-  if (authHeader === 'Bearer session_token_ai_reimbursement_2026') {
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (!authHeader) {
+    res.status(403).json({ success: false, error: '未授权访问，未提供认证Token' });
+    return;
+  }
+  
+  const token = typeof authHeader === 'string' ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
+  if (token === 'session_token_ai_reimbursement_2026') {
     next();
   } else {
-    res.status(403).json({ success: false, error: '未授权访问，请重新登录' });
+    res.status(403).json({ success: false, error: '未授权访问，Token无效，请重新登录' });
   }
 };
 
@@ -232,7 +263,10 @@ app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
       data = JSON.parse(fs.readFileSync(FEEDBACK_FILE, 'utf-8'));
     }
 
-    const filtered = data.filter((fb: any) => fb.id !== id);
+    const filtered = data.filter((fb: any) => {
+      if (!fb || !fb.id) return false;
+      return fb.id.toString().trim() !== id.toString().trim();
+    });
     fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
 
     res.json({ success: true });
@@ -251,12 +285,15 @@ app.delete('/api/admin/expense/:id', requireAdmin, (req, res) => {
     }
 
     const current = JSON.parse(fs.readFileSync(EXPENSES_FILE, 'utf-8'));
-    const filtered = current.filter((entry: any) => entry.id !== id);
+    const filtered = current.filter((entry: any) => {
+      if (!entry || !entry.id) return false;
+      return entry.id.toString().trim() !== id.toString().trim();
+    });
     fs.writeFileSync(EXPENSES_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
 
     res.json({ success: true });
   } catch (err: any) {
-    console.error(err);
+    console.error('Delete expense error:', err);
     res.status(500).json({ success: false, error: err.message || '删除报销记录失败' });
   }
 });
@@ -322,7 +359,7 @@ app.patch('/api/admin/attachment/:id/category', requireAdmin, (req, res) => {
 const startServer = async () => {
   if (process.env.NODE_ENV === 'production' || process.env.DISABLE_HMR) {
     // In production built mode, serve the static dist folder
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath));
       app.get('*', (_req, res) => {
@@ -351,4 +388,8 @@ const setupViteDevMiddleware = async () => {
   app.use(viteServer.middlewares);
 };
 
-startServer().catch(console.error);
+if (!isVercel) {
+  startServer().catch(console.error);
+}
+
+export default app;
