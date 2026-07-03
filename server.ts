@@ -241,6 +241,37 @@ app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
   }
 });
 
+// 8.1 Admin DELETE a single expense record
+app.delete('/api/admin/expense/:id', requireAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!fs.existsSync(EXPENSES_FILE)) {
+      res.json({ success: true });
+      return;
+    }
+
+    const current = JSON.parse(fs.readFileSync(EXPENSES_FILE, 'utf-8'));
+    const filtered = current.filter((entry: any) => entry.id !== id);
+    fs.writeFileSync(EXPENSES_FILE, JSON.stringify(filtered, null, 2), 'utf-8');
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message || '删除报销记录失败' });
+  }
+});
+
+// 8.2 Admin DELETE all expense records (Clear All)
+app.delete('/api/admin/expenses/clear', requireAdmin, (_req, res) => {
+  try {
+    fs.writeFileSync(EXPENSES_FILE, JSON.stringify([], null, 2), 'utf-8');
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message || '清除所有报销记录失败' });
+  }
+});
+
 // 9. Admin UPDATE attachment category
 app.patch('/api/admin/attachment/:id/category', requireAdmin, (req, res) => {
   try {

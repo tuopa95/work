@@ -16,7 +16,8 @@ import {
   RefreshCw,
   CheckCircle,
   Loader2,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 import { ExpenseEntry, Feedback, Attachment } from '../types';
 
@@ -94,6 +95,47 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       alert('更新分类失败，网络异常');
     } finally {
       setUpdatingCategory(false);
+    }
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    if (!window.confirm('确认要删除这条报销明细记录吗？此操作不可恢复。')) return;
+
+    try {
+      const res = await fetch(`/api/admin/expense/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setExpenses(prev => prev.filter(entry => entry.id !== id));
+      } else {
+        alert(data.error || '删除记录失败');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('删除记录失败，网络异常');
+    }
+  };
+
+  const handleClearAllExpenses = async () => {
+    if (!window.confirm('⚠️ 警告：确认要清除所有的报销记录吗？此操作将彻底清空所有已保存的报销数据，且不可恢复！')) return;
+
+    try {
+      const res = await fetch('/api/admin/expenses/clear', {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setExpenses([]);
+        alert('已成功清除所有报销记录！');
+      } else {
+        alert(data.error || '清除记录失败');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('清除记录失败，网络异常');
     }
   };
 
@@ -601,23 +643,32 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                 <span className="w-1.5 h-3.5 bg-blue-600 dark:bg-blue-500 rounded-full" />
                 <h3 className="text-[11px] font-bold tracking-wider text-slate-400 dark:text-zinc-500 uppercase">数据检索与控制中心</h3>
               </div>
-              <button
-                onClick={handleExportExcel}
-                disabled={isExporting}
-                className="flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-50 text-white dark:text-slate-900 font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.98] transition-all self-stretch md:self-auto border border-slate-900 dark:border-white duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isExporting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>正在生成图文报表...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>导出至 Excel</span>
-                  </>
-                )}
-              </button>
+              <div className="flex flex-wrap items-center gap-2 self-stretch md:self-auto">
+                <button
+                  onClick={handleClearAllExpenses}
+                  className="flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.98] border border-rose-200 dark:border-rose-900/30 transition-all duration-200 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>清除所有记录</span>
+                </button>
+                <button
+                  onClick={handleExportExcel}
+                  disabled={isExporting}
+                  className="flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-50 text-white dark:text-slate-900 font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.98] transition-all border border-slate-900 dark:border-white duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isExporting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>正在生成图文报表...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>导出至 Excel</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             {/* Filter Inputs Grid */}
@@ -797,6 +848,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                       <th className="px-6 py-4 text-right text-slate-950 dark:text-slate-100 font-black text-sm">金额</th>
                       <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">备注/用途</th>
                       <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">凭证与分类 (可点击修改分类)</th>
+                      <th className="px-6 py-4 text-center text-slate-950 dark:text-slate-100 font-black text-sm">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/60 font-medium text-slate-700 dark:text-zinc-350">
@@ -860,6 +912,16 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                               );
                             })}
                           </div>
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteExpense(entry.id)}
+                            className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-xl transition-all border border-rose-100 dark:border-rose-900/10 cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                            title="删除此记录"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -941,6 +1003,14 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                               <span className="font-mono font-bold text-slate-900 dark:text-white text-[15px]">
                                 ¥{item.amount.toFixed(2)}
                               </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteExpense(item.id)}
+                                className="p-1.5 text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/20 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-rose-100 dark:hover:border-rose-900/30 shadow-sm"
+                                title="删除此记录"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </div>
                         ))}

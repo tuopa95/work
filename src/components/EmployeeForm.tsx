@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Upload, Plus, Trash2, Send, MessageSquare, Check, Loader2, DollarSign, Calendar, FileText } from 'lucide-react';
+import { Upload, Plus, Trash2, Send, MessageSquare, Check, Loader2, DollarSign, Calendar, FileText, CheckCircle, X } from 'lucide-react';
 import { Attachment, ExpenseEntry } from '../types';
 
 interface EmployeeFormProps {
@@ -12,6 +12,15 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
   const [activeEntryId, setActiveEntryId] = useState<string>('');
   const [uploadingStates, setUploadingStates] = useState<{ [entryId: string]: boolean }>({});
   const [dragActiveStates, setDragActiveStates] = useState<{ [entryId: string]: boolean }>({});
+
+  // Submit Success state
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [lastSubmittedSummary, setLastSubmittedSummary] = useState<{
+    count: number;
+    totalAmount: number;
+    name: string;
+    entries: ExpenseEntry[];
+  } | null>(null);
 
   // Feedback State
   const [feedbackContent, setFeedbackContent] = useState('');
@@ -317,7 +326,16 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
       });
       const data = await res.json();
       if (data.success) {
-        alert('报销明细提交成功！');
+        // Prepare success summary to show in custom modal
+        const total = finalData.reduce((acc, curr) => acc + curr.amount, 0);
+        setLastSubmittedSummary({
+          count: finalData.length,
+          totalAmount: total,
+          name: name.trim(),
+          entries: [...entries]
+        });
+        setShowSuccessModal(true);
+
         // Clear draft
         localStorage.removeItem('draft_entries');
         const defaultId = `entry-${Date.now()}`;
@@ -770,6 +788,93 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
           </div>
         </div>
       </div>
+
+      {/* Submission Success Modal/Card Overlay */}
+      {showSuccessModal && lastSubmittedSummary && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl rounded-2xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto relative animate-in fade-in zoom-in-95 duration-200">
+            <button
+              onClick={() => {
+                setShowSuccessModal(false);
+                setLastSubmittedSummary(null);
+              }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors cursor-pointer"
+              title="关闭"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex flex-col items-center text-center pb-4 border-b border-slate-100 dark:border-zinc-850/80 mb-5">
+              <div className="w-16 h-16 rounded-full bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3.5 shadow-inner">
+                <CheckCircle className="w-10 h-10" />
+              </div>
+              <h2 className="text-lg font-black text-slate-900 dark:text-white">
+                🎉 报销明细提交成功！
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1 font-semibold">
+                您的报销申请已成功保存，财务管理员可立即在后台进行核对与修改。
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              <div className="bg-slate-50 dark:bg-zinc-950 p-4 rounded-xl border border-slate-150 dark:border-zinc-850/80 space-y-2.5">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-450 dark:text-zinc-500 font-bold">报销人</span>
+                  <span className="font-bold text-slate-800 dark:text-white">{lastSubmittedSummary.name}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-450 dark:text-zinc-500 font-bold">明细笔数</span>
+                  <span className="font-bold text-slate-800 dark:text-white">{lastSubmittedSummary.count} 笔</span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-450 dark:text-zinc-500 font-bold">总金额</span>
+                  <span className="font-black font-mono text-emerald-600 dark:text-emerald-400 text-sm">
+                    ¥{lastSubmittedSummary.totalAmount.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="text-[10px] text-slate-450 dark:text-zinc-500 font-bold uppercase tracking-wider mb-2">
+                  已提交明细
+                </h4>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {lastSubmittedSummary.entries.map((entry, idx) => (
+                    <div
+                      key={entry.id || idx}
+                      className="p-3 bg-white dark:bg-zinc-900/40 border border-slate-150 dark:border-zinc-800/80 rounded-xl flex justify-between items-center text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-slate-800 dark:text-white">
+                          明细 #{idx + 1}
+                        </p>
+                        <p className="text-[10px] text-slate-400 dark:text-zinc-500">
+                          {entry.expense_date} &bull; {entry.remark || '无备注'}
+                        </p>
+                      </div>
+                      <span className="font-mono font-bold text-slate-700 dark:text-zinc-300">
+                        ¥{entry.amount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <button
+                onClick={() => {
+                  setShowSuccessModal(false);
+                  setLastSubmittedSummary(null);
+                }}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-500/10 active:scale-[0.98] transition-all cursor-pointer text-center"
+              >
+                好的，我知道了
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

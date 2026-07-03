@@ -1,19 +1,12 @@
 import { useState } from 'react';
 import EmployeeForm from './components/EmployeeForm';
-import AdminLogin from './components/AdminLogin';
 import AdminDashboard from './components/AdminDashboard';
 import ThemeToggle from './components/ThemeToggle';
 import { ShieldAlert, Receipt, ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const [view, setView] = useState<'employee' | 'admin_login' | 'admin_dashboard'>('employee');
+  const [view, setView] = useState<'employee' | 'admin_dashboard'>('employee');
   const [adminToken, setAdminToken] = useState<string>(() => sessionStorage.getItem('admin_token') || '');
-
-  const handleAdminLoginSuccess = (token: string) => {
-    sessionStorage.setItem('admin_token', token);
-    setAdminToken(token);
-    setView('admin_dashboard');
-  };
 
   const handleLogout = () => {
     sessionStorage.removeItem('admin_token');
@@ -25,13 +18,6 @@ export default function App() {
   const renderMainView = () => {
     if (view === 'admin_dashboard' && adminToken) {
       return <AdminDashboard token={adminToken} onLogout={handleLogout} />;
-    }
-    if (view === 'admin_login') {
-      return (
-        <AdminLogin
-          onLoginSuccess={handleAdminLoginSuccess}
-        />
-      );
     }
     return (
       <EmployeeForm
@@ -67,11 +53,10 @@ export default function App() {
             {view === 'employee' ? (
               <button
                 onClick={() => {
-                  if (adminToken) {
-                    setView('admin_dashboard');
-                  } else {
-                    setView('admin_login');
-                  }
+                  const token = 'session_token_ai_reimbursement_2026';
+                  sessionStorage.setItem('admin_token', token);
+                  setAdminToken(token);
+                  setView('admin_dashboard');
                 }}
                 className="flex items-center gap-1 px-3.5 py-2 bg-slate-100 dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors text-xs font-bold text-gray-700 dark:text-gray-300 rounded-xl"
               >
@@ -112,11 +97,10 @@ export default function App() {
             <span>&bull;</span>
             <button
               onClick={() => {
-                if (adminToken) {
-                  setView('admin_dashboard');
-                } else {
-                  setView('admin_login');
-                }
+                const token = 'session_token_ai_reimbursement_2026';
+                sessionStorage.setItem('admin_token', token);
+                setAdminToken(token);
+                setView('admin_dashboard');
               }}
               className="hover:text-blue-500 transition-colors flex items-center gap-1"
             >
