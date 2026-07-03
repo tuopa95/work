@@ -1,119 +1,98 @@
-import React, { useState } from "react";
-import { Lock, User, AlertCircle, Sparkles, KeyRound } from "lucide-react";
+import { useState } from 'react';
+import { ShieldCheck, Lock, ArrowRight, Loader2 } from 'lucide-react';
 
 interface AdminLoginProps {
   onLoginSuccess: (token: string) => void;
-  onCancel: () => void;
 }
 
-export default function AdminLogin({ onLoginSuccess, onCancel }: AdminLoginProps) {
-  const [username, setUsername] = useState("admin");
-  const [error, setError] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+export default function AdminLogin({ onLoginSuccess }: AdminLoginProps) {
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) {
-      setError("请输入账号");
-      return;
-    }
+    if (!password.trim()) return;
 
-    setIsLoading(true);
-    setError("");
+    setLoading(true);
+    setError('');
 
     try {
-      const response = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim() })
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
       });
-
-      const result = await response.json();
-      if (result.success) {
-        onLoginSuccess(result.token);
+      const data = await res.json();
+      if (data.success) {
+        onLoginSuccess(data.token);
       } else {
-        setError(result.error || "账号错误");
+        setError(data.error || '登录失败，密码错误');
       }
     } catch (err) {
-      setError("连接网络超时，请检查服务状态");
+      console.error(err);
+      setError('网络连接异常');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div className="w-full max-w-md mx-auto" id="admin-login-card-container">
-      <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl p-6 md:p-8 border border-gray-100 dark:border-zinc-800 shadow-md transition-all duration-300">
-        <div className="text-center mb-8">
-          <div className="inline-flex p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-100/20 mb-3">
-            <KeyRound className="w-6 h-6 animate-pulse" />
+    <div className="max-w-md mx-auto px-4 py-16">
+      <div className="bg-white dark:bg-zinc-900 border border-gray-150 dark:border-zinc-850 rounded-2xl shadow-xl overflow-hidden">
+        {/* Banner */}
+        <div className="bg-blue-600 p-6 text-center text-white relative">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.15),transparent)] pointer-events-none" />
+          <div className="inline-flex items-center justify-center p-3 bg-white/10 rounded-2xl mb-3 backdrop-blur-sm">
+            <ShieldCheck className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white tracking-tight">管理员登录</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            免密码安全通道，直接输入账号即可登录后台
+          <h2 className="text-xl font-extrabold tracking-tight">后台管理系统</h2>
+          <p className="text-xs text-blue-100 mt-1">
+            仅限系统管理员及财务审核人员访问
           </p>
         </div>
 
-        {error && (
-          <div className="mb-5 p-3.5 bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs flex items-center gap-2 border border-rose-100/50 dark:border-rose-950/40">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span className="font-medium">{error}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Form */}
+        <form onSubmit={handleLogin} className="p-6 space-y-4">
           <div>
-            <div className="flex justify-between items-center mb-1.5">
-              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                管理员账号
-              </label>
-              <span className="text-[10px] text-emerald-500 font-medium bg-emerald-50 dark:bg-emerald-950/30 px-1.5 py-0.5 rounded">免密登录已启用</span>
-            </div>
-            <div className="relative">
-              <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400">
-                <User className="w-4 h-4" />
-              </span>
-              <input
-                id="admin-username-input"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
-                className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200/80 dark:border-zinc-800 bg-gray-50/50 dark:bg-[#121214] text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm font-semibold"
-              />
-            </div>
+            <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 mb-1.5 flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" />
+              管理后台访问密码
+            </label>
+            <input
+              type="password"
+              required
+              placeholder="请输入管理密码"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm font-semibold"
+            />
           </div>
 
-          <div className="pt-2 flex flex-col gap-2.5">
-            <button
-              id="admin-login-submit-btn"
-              type="submit"
-              disabled={isLoading}
-              className={`w-full py-3 px-4 rounded-xl font-semibold text-white tracking-wide transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer ${
-                isLoading
-                  ? "bg-blue-400 dark:bg-blue-600/70 cursor-not-allowed"
-                  : "bg-blue-500 hover:bg-blue-600 active:scale-[0.99] hover:shadow-lg hover:shadow-blue-500/10"
-              }`}
-            >
-              {isLoading ? "正在验证..." : "免密一键登录"}
-            </button>
-            
-            <button
-              id="admin-login-cancel-btn"
-              type="button"
-              onClick={onCancel}
-              className="w-full py-3 px-4 rounded-xl text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-zinc-900 border border-gray-150 dark:border-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-800 text-sm font-semibold transition-all cursor-pointer"
-            >
-              返回员工报销提交页
-            </button>
-          </div>
+          {error && (
+            <p className="text-xs text-rose-500 font-semibold bg-rose-50 dark:bg-rose-950/20 px-3 py-2 rounded-lg border border-rose-100 dark:border-rose-900/30">
+              {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !password.trim()}
+            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>正在验证登录...</span>
+              </>
+            ) : (
+              <>
+                <span>进入管理后台</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
         </form>
-
-        <div className="mt-6 pt-5 border-t border-gray-100 dark:border-zinc-850 text-center">
-          <p className="text-[11px] text-gray-400 dark:text-gray-500 flex items-center justify-center gap-1">
-            <Sparkles className="w-3.5 h-3.5 text-blue-500" /> 输入默认账号 <span className="font-bold text-gray-700 dark:text-gray-300">admin</span> 即可直接安全进入
-          </p>
-        </div>
       </div>
     </div>
   );

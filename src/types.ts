@@ -1,26 +1,24 @@
-export type AttachmentCategory = 'invoice' | 'payment' | 'itinerary' | 'other';
-
 export interface Attachment {
-  id: string; // unique local ID for drag-and-drop and state management
-  image_url: string; // Base64 or local server URL or Supabase Storage URL
-  category: AttachmentCategory;
+  id: string;
+  image_url: string;
+  category: 'invoice' | 'taxi' | 'meal' | 'hotel' | 'other' | string;
   fileName: string;
   base64?: string;
 }
 
-export interface Expense {
+export interface ExpenseEntry {
   id: string;
   name: string;
   expense_date: string;
   amount: number;
   remark: string;
   attachments: Attachment[];
-  created_at: string;
+  submit_time?: string;
 }
 
-export interface DashboardStats {
-  totalPeople: number;
-  totalAmount: number;
-  todayCount: number;
-  thisMonthCount: number;
+export interface Feedback {
+  id: string;
+  content: string;
+  contact: string;
+  createdAt: string;
 }

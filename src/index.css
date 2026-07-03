@@ -1,47 +1,19 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-@import "tailwindcss";
-
-@theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
-}
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 @layer base {
   body {
-    @apply font-sans antialiased bg-[#f5f5f7] text-[#1d1d1f] transition-colors duration-300;
-  }
-  
-  .dark body {
-    @apply bg-[#000000] text-[#f5f5f7];
+    @apply antialiased text-slate-800 bg-slate-50 dark:text-zinc-100 dark:bg-zinc-950;
   }
 }
 
-/* Custom scrollbar to look like macOS/iOS */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Animations */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(0.98); }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 9999px;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-/* Custom smooth zoom transitions */
-.image-zoom-enter {
-  transform: scale(0.95);
-  opacity: 0;
-}
-.image-zoom-enter-active {
-  transform: scale(1);
-  opacity: 1;
-  transition: transform 300ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms ease;
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s infinite ease-in-out;
 }
