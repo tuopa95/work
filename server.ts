@@ -357,20 +357,17 @@ app.patch('/api/admin/attachment/:id/category', requireAdmin, (req, res) => {
 
 // Vite Dev Server / Static Middleware configuration
 const startServer = async () => {
-  if (process.env.NODE_ENV === 'production' || process.env.DISABLE_HMR) {
+  const distPath = path.join(process.cwd(), 'dist');
+  const indexHtmlPath = path.join(distPath, 'index.html');
+
+  if (process.env.NODE_ENV === 'production' && fs.existsSync(indexHtmlPath)) {
     // In production built mode, serve the static dist folder
-    const distPath = path.join(process.cwd(), 'dist');
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
-      app.get('*', (_req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
-      });
-    } else {
-      // Dev mode fallback if dist is missing
-      console.warn('Production static path missing, starting Vite middleware...');
-      await setupViteDevMiddleware();
-    }
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(indexHtmlPath);
+    });
   } else {
+    // Dev mode or missing dist/index.html fallback, start Vite dev middleware
     await setupViteDevMiddleware();
   }
 

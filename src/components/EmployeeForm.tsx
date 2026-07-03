@@ -2,6 +2,52 @@ import { useState, useEffect } from 'react';
 import { Upload, Plus, Trash2, Send, MessageSquare, Check, Loader2, DollarSign, Calendar, FileText, CheckCircle, X } from 'lucide-react';
 import { Attachment, ExpenseEntry } from '../types';
 
+const compressImage = (file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.7): Promise<{ base64: string; fileName: string }> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve({ base64: event.target?.result as string, fileName: file.name });
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        // Compress as JPEG to significantly reduce size
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve({ base64: compressedBase64, fileName: file.name.replace(/\.[^/.]+$/, "") + ".jpg" });
+      };
+      img.onerror = () => {
+        resolve({ base64: event.target?.result as string, fileName: file.name });
+      };
+    };
+    reader.onerror = () => {
+      resolve({ base64: '', fileName: file.name });
+    };
+  });
+};
+
 interface EmployeeFormProps {
   onSuccess: () => void;
 }
@@ -132,38 +178,38 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
           fileName = `粘贴凭证_${year}${month}${date}_${hours}${minutes}${seconds}.png`;
         }
 
-        // Convert to Base64
-        const base64 = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(file);
-        });
+        // 1. Compress Image client-side to significantly reduce size (typically to 100kb-300kb)
+        const { base64: compressedBase64, fileName: compressedName } = await compressImage(file);
+        if (!compressedBase64) {
+          continue;
+        }
 
-        // Upload to server
+        // 2. Upload to server
+        let uploadedUrl = '';
         try {
           const res = await fetch('/api/upload', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: fileName, type: file.type, base64 })
+            body: JSON.stringify({ name: compressedName, type: 'image/jpeg', base64: compressedBase64 })
           });
           const result = await res.json();
           if (result.success) {
-            newAttachments.push({
-              id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-              image_url: result.url,
-              category: guessCategory(fileName),
-              fileName: fileName,
-              base64: base64
-            });
+            uploadedUrl = result.url;
           } else {
-            console.error('Upload failed:', result.error);
-            alert(`图片上传失败: ${result.error || '未知错误'}`);
+            console.warn('Server upload failed, using local base64 fallback:', result.error);
           }
         } catch (error) {
-          console.error('Network error uploading file:', error);
-          alert('网络连接异常，上传图片失败');
+          console.warn('Server upload network error, using local base64 fallback:', error);
         }
+
+        // 3. Add attachment (fallback to compressedBase64 if uploadedUrl is empty)
+        newAttachments.push({
+          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          image_url: uploadedUrl || compressedBase64,
+          category: guessCategory(compressedName),
+          fileName: compressedName,
+          base64: compressedBase64
+        });
       }
 
       if (newAttachments.length > 0) {
