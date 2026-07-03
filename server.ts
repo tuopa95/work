@@ -101,8 +101,31 @@ app.post('/api/expenses', (req, res) => {
       submit_time: entry.submit_time || timestamp
     }));
 
-    // Combine
-    const updated = [...finalEntries, ...current]; // put new ones first
+    // Combine and deduplicate by entry ID to completely prevent duplicates
+    const seenIds = new Set<string>();
+    const updated: any[] = [];
+
+    // Add new ones first
+    finalEntries.forEach((entry: any) => {
+      if (entry && entry.id) {
+        updated.push(entry);
+        seenIds.add(entry.id);
+      }
+    });
+
+    // Add existing ones if not already added
+    current.forEach((item: any) => {
+      if (item && item.id) {
+        if (!seenIds.has(item.id)) {
+          updated.push(item);
+          seenIds.add(item.id);
+        }
+      } else {
+        // Fallback for older items without an ID
+        updated.push(item);
+      }
+    });
+
     fs.writeFileSync(EXPENSES_FILE, JSON.stringify(updated, null, 2), 'utf-8');
 
     res.json({ success: true });
@@ -215,6 +238,52 @@ app.delete('/api/admin/feedback/:id', requireAdmin, (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: '删除反馈失败' });
+  }
+});
+
+// 9. Admin UPDATE attachment category
+app.patch('/api/admin/attachment/:id/category', requireAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    const { category } = req.body;
+
+    if (!category) {
+      res.status(400).json({ success: false, error: '类别不能为空' });
+      return;
+    }
+
+    if (!fs.existsSync(EXPENSES_FILE)) {
+      res.status(404).json({ success: false, error: '未找到报销数据文件' });
+      return;
+    }
+
+    const current = JSON.parse(fs.readFileSync(EXPENSES_FILE, 'utf-8'));
+    let found = false;
+
+    const updated = current.map((entry: any) => {
+      if (entry.attachments) {
+        const updatedAttachments = entry.attachments.map((att: any) => {
+          if (att.id === id) {
+            found = true;
+            return { ...att, category };
+          }
+          return att;
+        });
+        return { ...entry, attachments: updatedAttachments };
+      }
+      return entry;
+    });
+
+    if (!found) {
+      res.status(404).json({ success: false, error: '未找到该凭证图片' });
+      return;
+    }
+
+    fs.writeFileSync(EXPENSES_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message || '更新凭证分类失败' });
   }
 });
 

@@ -18,7 +18,7 @@ import {
   Loader2,
   X
 } from 'lucide-react';
-import { ExpenseEntry, Feedback } from '../types';
+import { ExpenseEntry, Feedback, Attachment } from '../types';
 
 const categories = [
   { value: 'invoice', label: '🧾 发票', color: 'bg-blue-500' },
@@ -51,7 +51,51 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
 
   // Preview image state
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [selectedAttachment, setSelectedAttachment] = useState<Attachment | null>(null);
+  const [updatingCategory, setUpdatingCategory] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  const handleUpdateCategory = async (attachmentId: string, newCategory: string) => {
+    setUpdatingCategory(true);
+    try {
+      const res = await fetch(`/api/admin/attachment/${attachmentId}/category`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ category: newCategory })
+      });
+      const data = await res.json();
+      if (data.success) {
+        // Update local state
+        setExpenses(prev => prev.map(entry => {
+          if (entry.attachments) {
+            const updatedAtts = entry.attachments.map(att => {
+              if (att.id === attachmentId) {
+                return { ...att, category: newCategory };
+              }
+              return att;
+            });
+            return { ...entry, attachments: updatedAtts };
+          }
+          return entry;
+        }));
+        
+        // Update selected attachment preview
+        if (selectedAttachment && selectedAttachment.id === attachmentId) {
+          setSelectedAttachment({ ...selectedAttachment, category: newCategory });
+        }
+      } else {
+        alert(data.error || '更新分类失败');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('更新分类失败，网络异常');
+    } finally {
+      setUpdatingCategory(false);
+    }
+  };
 
   // Fetch data
   const fetchData = async () => {
@@ -220,75 +264,84 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
 
       // 3. Build HTML table rows
       let tableRows = '';
+      
+      const categoryLabelMap: { [key: string]: string } = {
+        invoice: '发票',
+        payment_screenshot: '付款截图',
+        itinerary: '行程单',
+        travel_request: '出差申请',
+        other: '其他'
+      };
+
+      const activeCategories = selectedCategories.length === 0
+        ? categories
+        : categories.filter(c => selectedCategories.includes(c.value));
 
       filteredExpenses.forEach((entry, idx) => {
-        const invoiceAtts = entry.attachments.filter(a => a.category === 'invoice');
-        const screenshotAtts = entry.attachments.filter(a => a.category === 'payment_screenshot');
-        const itineraryAtts = entry.attachments.filter(a => a.category === 'itinerary');
-        const travelRequestAtts = entry.attachments.filter(a => a.category === 'travel_request');
-        const otherAtts = entry.attachments.filter(a => a.category === 'other');
+        // Group attachments by category for active categories only
+        const activeCategoryGroups = activeCategories.map(cat => ({
+          category: cat.value,
+          atts: entry.attachments.filter(a => a.category === cat.value)
+        }));
 
+        // The number of rows for this entry is the max attachments in any of the active categories, or at least 1
         const maxRows = Math.max(
-          invoiceAtts.length,
-          screenshotAtts.length,
-          itineraryAtts.length,
-          travelRequestAtts.length,
-          otherAtts.length,
+          ...activeCategoryGroups.map(g => g.atts.length),
           1
         );
 
         for (let r = 0; r < maxRows; r++) {
           const isFirstRow = r === 0;
+          const submitTimeDisplay = entry.submit_time || '未知时间';
 
-          const renderImageCell = (attList: any[], index: number) => {
-            const att = attList[index];
-            if (!att) return '<td style="border: 1px solid #cbd5e1;"></td>';
+          let rowHtml = `<tr style="height: 150px;">`;
 
-            // We reference the image via its unique CID matching Content-Location in MHTML
+          if (isFirstRow) {
+            rowHtml += `
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; font-family: sans-serif;">${idx + 1}</td>
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; font-size: 13px; color: #1e293b; font-family: sans-serif;">${entry.name}</td>
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; color: #475569; font-family: sans-serif;">${entry.expense_date}</td>
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; color: #475569; font-family: sans-serif;">${submitTimeDisplay}</td>
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; color: #059669; font-size: 13px; font-family: sans-serif;">¥${entry.amount.toFixed(2)}</td>
+            `;
+          }
+
+          // Image cells for each active category
+          activeCategoryGroups.forEach(group => {
+            const att = group.atts[r];
+            if (!att) {
+              rowHtml += '<td style="border: 1px solid #cbd5e1;"></td>';
+              return;
+            }
+
             const imageCid = `att_${att.id}`;
             const imgInfo = base64Map.get(att.id);
 
-            // If there's no base64 image data fetched successfully, fallback to a standard text or broken icon placeholder
             if (!imgInfo || !imgInfo.rawBase64) {
-              return `
+              rowHtml += `
                 <td style="width: 140px; height: 140px; text-align: center; vertical-align: middle; border: 1px solid #cbd5e1; padding: 6px; background-color: #f8fafc; color: #94a3b8; font-size: 10px;">
                   图片未能加载
                 </td>
               `;
+            } else {
+              rowHtml += `
+                <td style="width: 140px; height: 140px; text-align: center; vertical-align: middle; border: 1px solid #cbd5e1; padding: 6px;">
+                  <div style="width: 130px; height: 130px; display: flex; align-items: center; justify-content: center; margin: 0 auto; overflow: hidden;">
+                    <img src="${imageCid}" width="120" height="120" style="max-width: 120px; max-height: 120px; border-radius: 4px; border: 1px solid #e2e8f0; display: block; object-fit: contain; margin: 0 auto;" />
+                  </div>
+                </td>
+              `;
             }
+          });
 
-            return `
-              <td style="width: 140px; height: 140px; text-align: center; vertical-align: middle; border: 1px solid #cbd5e1; padding: 6px;">
-                <div style="width: 130px; height: 130px; display: flex; align-items: center; justify-content: center; margin: 0 auto; overflow: hidden;">
-                  <img src="${imageCid}" width="120" height="120" style="max-width: 120px; max-height: 120px; border-radius: 4px; border: 1px solid #e2e8f0; display: block; object-fit: contain; margin: 0 auto;" />
-                </div>
-              </td>
+          if (isFirstRow) {
+            rowHtml += `
+              <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: left; vertical-align: middle; padding: 12px; color: #334155; font-size: 12px; line-height: 1.5; max-width: 240px; word-wrap: break-word; font-family: sans-serif;">${entry.remark || '<span style="color:#94a3b8; font-style:italic;">无备注说明</span>'}</td>
             `;
-          };
+          }
 
-          const submitTimeDisplay = entry.submit_time || '未知时间';
-
-          tableRows += `
-            <tr style="height: 150px;">
-              ${isFirstRow ? `
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; font-family: sans-serif;">${idx + 1}</td>
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; font-size: 13px; color: #1e293b; font-family: sans-serif;">${entry.name}</td>
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; color: #475569; font-family: sans-serif;">${entry.expense_date}</td>
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; color: #475569; font-family: sans-serif;">${submitTimeDisplay}</td>
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: center; vertical-align: middle; font-weight: bold; color: #059669; font-size: 13px; font-family: sans-serif;">¥${entry.amount.toFixed(2)}</td>
-              ` : ''}
-
-              ${renderImageCell(invoiceAtts, r)}
-              ${renderImageCell(screenshotAtts, r)}
-              ${renderImageCell(itineraryAtts, r)}
-              ${renderImageCell(travelRequestAtts, r)}
-              ${renderImageCell(otherAtts, r)}
-
-              ${isFirstRow ? `
-                <td rowspan="${maxRows}" style="border: 1px solid #cbd5e1; text-align: left; vertical-align: middle; padding: 12px; color: #334155; font-size: 12px; line-height: 1.5; max-width: 240px; word-wrap: break-word; font-family: sans-serif;">${entry.remark || '<span style="color:#94a3b8; font-style:italic;">无备注说明</span>'}</td>
-              ` : ''}
-            </tr>
-          `;
+          rowHtml += '</tr>';
+          tableRows += rowHtml;
         }
       });
 
@@ -341,7 +394,6 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
           </style>
         </head>
         <body>
-          <h2 style="text-align: center; color: #1e3a8a; font-family: sans-serif; margin-bottom: 20px; font-size: 18px;">团队报销明细图文报告</h2>
           <table border="1">
             <thead>
               <tr>
@@ -350,11 +402,9 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                 <th style="width: 110px; background-color: #3b82f6; color: #ffffff;">消费日期</th>
                 <th style="width: 160px; background-color: #3b82f6; color: #ffffff;">提交时间</th>
                 <th style="width: 110px; background-color: #3b82f6; color: #ffffff;">报销金额</th>
-                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">发票</th>
-                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">付款截图</th>
-                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">行程单</th>
-                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">出差申请</th>
-                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">其他</th>
+                ${activeCategories.map(cat => `
+                <th style="width: 150px; background-color: #3b82f6; color: #ffffff;">${categoryLabelMap[cat.value]}</th>
+                `).join('')}
                 <th style="width: 240px; background-color: #3b82f6; color: #ffffff;">备注说明</th>
               </tr>
             </thead>
@@ -426,14 +476,16 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       {/* Top Navbar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
-          <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-            财务收纳管理后台
-            <span className="text-xs bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 font-bold px-2 py-0.5 rounded-full">
+          <h1 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
+            <span className="bg-gradient-to-r from-slate-900 via-blue-800 to-slate-900 dark:from-white dark:via-blue-400 dark:to-white bg-clip-text text-transparent">
+              财务票据智能收纳管理后台
+            </span>
+            <span className="text-xs bg-blue-600 dark:bg-blue-600 text-white font-extrabold px-2.5 py-1 rounded-xl shadow-lg shadow-blue-500/10">
               PRO
             </span>
           </h1>
-          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-            审核团队报销数据，监控提交质量并管理团队问题反馈。
+          <p className="text-xs md:text-sm font-semibold text-slate-500 dark:text-zinc-400 mt-2">
+            审核团队报销数据，实时监控提交质量，并处理或答复团队问题反馈。
           </p>
         </div>
 
@@ -738,13 +790,13 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
               /* Regular Flat List */
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-left text-xs">
-                  <thead className="bg-slate-50/45 dark:bg-zinc-900/40 text-slate-400 dark:text-zinc-500 font-bold border-b border-slate-100 dark:border-zinc-800/80 tracking-wider uppercase text-[10px]">
+                  <thead className="bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-slate-100 font-black border-b border-slate-200 dark:border-zinc-700 tracking-wider uppercase text-xs shadow-sm">
                     <tr>
-                      <th className="px-6 py-4">报销人</th>
-                      <th className="px-6 py-4">消费日期</th>
-                      <th className="px-6 py-4 text-right">金额</th>
-                      <th className="px-6 py-4">备注/用途</th>
-                      <th className="px-6 py-4">凭证与分类</th>
+                      <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">报销人</th>
+                      <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">消费日期</th>
+                      <th className="px-6 py-4 text-right text-slate-950 dark:text-slate-100 font-black text-sm">金额</th>
+                      <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">备注/用途</th>
+                      <th className="px-6 py-4 text-slate-950 dark:text-slate-100 font-black text-sm">凭证与分类 (可点击修改分类)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/60 font-medium text-slate-700 dark:text-zinc-350">
@@ -791,11 +843,14 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                                 <button
                                   key={att.id}
                                   type="button"
-                                  onClick={() => setPreviewImage(att.image_url)}
+                                  onClick={() => {
+                                    setSelectedAttachment(att);
+                                    setPreviewImage(att.image_url);
+                                  }}
                                   className={`pl-1.5 pr-3 py-1 rounded-full font-bold text-[10px] flex items-center gap-1.5 border transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.02)] ${
                                     bgColors[att.category] || 'bg-slate-100 text-slate-700 border-transparent'
                                   }`}
-                                  title="点击查看大图"
+                                  title="点击查看并管理此凭证分类"
                                 >
                                   <div className="w-4 h-4 rounded-full overflow-hidden border border-black/10 dark:border-white/10 flex-shrink-0 bg-slate-50 flex items-center justify-center">
                                     <img src={att.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -869,9 +924,12 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                                   <button
                                     key={att.id}
                                     type="button"
-                                    onClick={() => setPreviewImage(att.image_url)}
+                                    onClick={() => {
+                                      setSelectedAttachment(att);
+                                      setPreviewImage(att.image_url);
+                                    }}
                                     className="p-1.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200/60 dark:border-zinc-700/60 rounded-xl hover:bg-blue-50 hover:text-blue-500 dark:hover:bg-blue-950/30 dark:hover:text-blue-450 transition-all shadow-[0_1px_2px_rgba(0,0,0,0.02)] flex items-center justify-center cursor-pointer hover:scale-105"
-                                    title="查看凭证"
+                                    title="查看及修改凭证分类"
                                   >
                                     <div className="w-5 h-5 rounded-md overflow-hidden border border-black/5 flex-shrink-0 mr-1.5 bg-white">
                                       <img src={att.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -963,26 +1021,115 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
         </div>
       )}
 
-      {/* Full Screen Image Overlay Preview */}
+      {/* Full Screen Image Overlay Preview with Category Modifying Controls */}
       {previewImage && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setPreviewImage(null)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6"
+          onClick={() => {
+            setPreviewImage(null);
+            setSelectedAttachment(null);
+          }}
         >
-          <div className="relative max-w-4xl max-h-[90vh] bg-zinc-950 p-2 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden">
-            <button
-              onClick={() => setPreviewImage(null)}
-              className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 backdrop-blur-md transition-colors"
-              title="关闭预览"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <img
-              src={previewImage}
-              alt="Receipt receipt preview fully zoomed"
-              className="object-contain max-w-full max-h-[85vh] rounded"
-              onClick={e => e.stopPropagation()} // Prevent closing when clicking on the image
-            />
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl flex flex-col md:flex-row max-w-5xl w-full max-h-[90vh] overflow-hidden"
+            onClick={e => e.stopPropagation()} // Prevent closing when clicking inside the panel
+          >
+            {/* Left: Image Preview Container */}
+            <div className="flex-1 bg-slate-950 flex items-center justify-center p-4 relative min-h-[300px] md:min-h-0">
+              <img
+                src={previewImage}
+                alt="Receipt receipt preview fully zoomed"
+                className="object-contain max-w-full max-h-[50vh] md:max-h-[80vh] rounded-lg shadow-inner"
+              />
+              <button
+                onClick={() => {
+                  setPreviewImage(null);
+                  setSelectedAttachment(null);
+                }}
+                className="absolute top-4 left-4 md:hidden bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors border border-white/10"
+                title="关闭预览"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Right: Controls Panel */}
+            <div className="w-full md:w-80 bg-slate-50 dark:bg-zinc-900 border-t md:border-t-0 md:border-l border-slate-200 dark:border-zinc-800 p-5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <span className="w-1.5 h-3.5 bg-blue-600 rounded-full" />
+                    凭证大图与分类管理
+                  </h3>
+                  <button
+                    onClick={() => {
+                      setPreviewImage(null);
+                      setSelectedAttachment(null);
+                    }}
+                    className="hidden md:flex bg-slate-200 hover:bg-slate-300 dark:bg-zinc-850 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-full p-1.5 transition-colors cursor-pointer"
+                    title="关闭"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {selectedAttachment ? (
+                  <div className="space-y-4">
+                    <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-slate-150 dark:border-zinc-850">
+                      <p className="text-[10px] text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider mb-1">文件名</p>
+                      <p className="text-xs text-slate-800 dark:text-zinc-200 font-mono break-all font-semibold leading-relaxed">
+                        {selectedAttachment.fileName || '未知文件'}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="block text-[10px] text-slate-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
+                        更改凭证分类类别
+                      </label>
+                      <div className="grid grid-cols-1 gap-2">
+                        {categories.map(cat => {
+                          const isCurrent = selectedAttachment.category === cat.value;
+                          return (
+                            <button
+                              key={cat.value}
+                              type="button"
+                              disabled={updatingCategory}
+                              onClick={() => handleUpdateCategory(selectedAttachment.id, cat.value)}
+                              className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all border flex items-center justify-between cursor-pointer disabled:opacity-50 ${
+                                isCurrent
+                                  ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-500/15'
+                                  : 'bg-white hover:bg-slate-50 dark:bg-zinc-950 dark:hover:bg-zinc-850 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-zinc-800'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className={`w-2.5 h-2.5 rounded-full ${isCurrent ? 'bg-white' : cat.color}`} />
+                                <span>{cat.label}</span>
+                              </div>
+                              {isCurrent && (
+                                <span className="text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-black uppercase">
+                                  当前
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 dark:text-zinc-500">
+                    请点击具体的凭证标签以进行类别编辑。
+                  </p>
+                )}
+              </div>
+
+              {updatingCategory && (
+                <div className="mt-4 p-2 bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/30 rounded-xl flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 font-semibold justify-center">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>正在同步修改至服务器...</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

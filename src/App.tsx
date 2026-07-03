@@ -55,10 +55,10 @@ export default function App() {
               <Receipt className="w-5 h-5 group-hover:rotate-12 transition-transform" />
             </div>
             <div>
-              <h1 className="text-sm font-black text-slate-900 dark:text-white leading-none">
-                AI 报销收纳
+              <h1 className="text-base md:text-lg font-black tracking-tight text-slate-900 dark:text-white leading-none">
+                <span className="bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-300 bg-clip-text text-transparent">AI 智能团队报销收纳助手</span>
               </h1>
-              <p className="text-[10px] text-gray-400 mt-1">智能财务收集端</p>
+              <p className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-bold mt-1.5 uppercase tracking-wide">智能财务票据分类与收集平台</p>
             </div>
           </button>
 

@@ -18,6 +18,7 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
   const [feedbackContact, setFeedbackContact] = useState('');
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Load draft or initialize with one empty entry
   useEffect(() => {
@@ -281,6 +282,8 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
   const handleSubmitAll = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    if (isSubmitting) return;
+
     if (!name.trim()) {
       alert('请填写报销人姓名');
       return;
@@ -305,6 +308,7 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
       name: name.trim()
     }));
 
+    setIsSubmitting(true);
     try {
       const res = await fetch('/api/expenses', {
         method: 'POST',
@@ -335,6 +339,8 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
     } catch (err) {
       console.error(err);
       alert('网络提交异常，请检查网络后再试');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -683,10 +689,20 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
           </button>
           <button
             type="submit"
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all flex items-center gap-1.5"
+            disabled={isSubmitting}
+            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-blue-500/10 hover:shadow-blue-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Check className="w-4 h-4" />
-            提交上述报销明细
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>正在提交报销明细...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                <span>提交上述报销明细</span>
+              </>
+            )}
           </button>
         </div>
       </form>
