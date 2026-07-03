@@ -55,6 +55,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
   const [selectedAttachment, setSelectedAttachment] = useState<Attachment | null>(null);
   const [updatingCategory, setUpdatingCategory] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const handleUpdateCategory = async (attachmentId: string, newCategory: string) => {
     setUpdatingCategory(true);
@@ -513,6 +514,170 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
     }
   };
 
+  const handleExportPdf = async () => {
+    if (filteredExpenses.length === 0) {
+      alert('当前筛选条件下没有可导出的数据');
+      return;
+    }
+
+    // 1. Gather all unique attachments
+    const allAttachments: Attachment[] = [];
+    filteredExpenses.forEach(entry => {
+      entry.attachments.forEach(att => {
+        if (!allAttachments.some(a => a.id === att.id)) {
+          allAttachments.push(att);
+        }
+      });
+    });
+
+    if (allAttachments.length === 0) {
+      alert('当前筛选条件下的账单没有图片/发票附件可供导出！');
+      return;
+    }
+
+    setIsExportingPdf(true);
+
+    try {
+      // 2. Fetch and convert all to raw base64 data
+      const base64Map = new Map<string, { rawBase64: string; mimeType: string }>();
+      
+      const getMimeType = (url: string, fileName?: string): string => {
+        const name = (fileName || url || '').toLowerCase();
+        if (name.endsWith('.png')) return 'image/png';
+        if (name.endsWith('.gif')) return 'image/gif';
+        if (name.endsWith('.bmp')) return 'image/bmp';
+        if (name.endsWith('.webp')) return 'image/webp';
+        return 'image/jpeg';
+      };
+
+      await Promise.all(
+        allAttachments.map(async att => {
+          let rawBase64 = '';
+          const mimeType = getMimeType(att.image_url, att.fileName);
+
+          if (att.base64) {
+            rawBase64 = att.base64.replace(/^data:image\/\w+;base64,/, '');
+          } else {
+            try {
+              const res = await fetch(att.image_url);
+              if (res.ok) {
+                const blob = await res.blob();
+                rawBase64 = await new Promise<string>((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    const result = reader.result as string;
+                    resolve(result.replace(/^data:image\/\w+;base64,/, ''));
+                  };
+                  reader.onerror = reject;
+                  reader.readAsDataURL(blob);
+                });
+              }
+            } catch (err) {
+              console.error(`Failed to fetch attachment ${att.id} image:`, err);
+            }
+          }
+
+          base64Map.set(att.id, { rawBase64, mimeType });
+        })
+      );
+
+      // 3. Load jsPDF dynamically
+      const { jsPDF } = await import('jspdf');
+
+      let doc: any = null;
+      let addedPageCount = 0;
+
+      for (let i = 0; i < allAttachments.length; i++) {
+        const att = allAttachments[i];
+        const data = base64Map.get(att.id);
+        if (!data || !data.rawBase64) continue;
+
+        const dataUrl = `data:${data.mimeType};base64,${data.rawBase64}`;
+
+        // Get actual dimensions to preserve aspect ratio
+        const dims = await new Promise<{ width: number; height: number }>((resolve) => {
+          const img = new Image();
+          img.onload = () => {
+            resolve({ width: img.naturalWidth || 800, height: img.naturalHeight || 600 });
+          };
+          img.onerror = () => {
+            resolve({ width: 800, height: 600 });
+          };
+          img.src = dataUrl;
+        });
+
+        const naturalWidth = dims.width;
+        const naturalHeight = dims.height;
+
+        const orientation = naturalWidth > naturalHeight ? 'landscape' : 'portrait';
+        const isLandscape = orientation === 'landscape';
+
+        // Page sizes in mm (A4)
+        const pageWidth = isLandscape ? 297 : 210;
+        const pageHeight = isLandscape ? 210 : 297;
+
+        // Determine scaling keeping aspect ratio inside the page with margins (10mm)
+        const margin = 12;
+        const maxW = pageWidth - margin * 2;
+        const maxH = pageHeight - margin * 2;
+
+        const ratio = Math.min(maxW / naturalWidth, maxH / naturalHeight);
+        const w = naturalWidth * ratio;
+        const h = naturalHeight * ratio;
+
+        // Centering coordinates
+        const x = (pageWidth - w) / 2;
+        const y = (pageHeight - h) / 2;
+
+        if (addedPageCount === 0) {
+          doc = new jsPDF({
+            orientation: orientation === 'landscape' ? 'l' : 'p',
+            unit: 'mm',
+            format: 'a4'
+          });
+        } else {
+          doc.addPage('a4', orientation === 'landscape' ? 'l' : 'p');
+        }
+
+        // Add the image
+        doc.addImage(dataUrl, data.mimeType.split('/')[1].toUpperCase(), x, y, w, h);
+        
+        // Add minimal elegant header/footer details
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        
+        const categoryMap: { [key: string]: string } = {
+          invoice: '发票 🧾',
+          payment_screenshot: '付款截图 📱',
+          itinerary: '行程单 🎫',
+          travel_request: '出差申请 📝',
+          other: '其他附件 📦'
+        };
+        const catLabel = categoryMap[att.category] || att.category || '附件';
+        
+        // Print header
+        doc.text(`AI 报销助手 | 附件类型: ${catLabel}`, margin, 8);
+        
+        // Print footer
+        const footerText = `第 ${addedPageCount + 1} 页`;
+        doc.text(footerText, pageWidth - margin - doc.getTextWidth(footerText), pageHeight - 6);
+
+        addedPageCount++;
+      }
+
+      if (doc) {
+        doc.save(`reimbursement_attachments_${Date.now()}.pdf`);
+      } else {
+        alert('没有可以导出的有效图片！');
+      }
+    } catch (err) {
+      console.error('Failed to export PDF:', err);
+      alert('生成 PDF 失败，请重试');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
       {/* Top Navbar */}
@@ -653,7 +818,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                 </button>
                 <button
                   onClick={handleExportExcel}
-                  disabled={isExporting}
+                  disabled={isExporting || isExportingPdf}
                   className="flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-50 text-white dark:text-slate-900 font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.98] transition-all border border-slate-900 dark:border-white duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isExporting ? (
@@ -665,6 +830,23 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                     <>
                       <Download className="w-3.5 h-3.5" />
                       <span>导出至 Excel</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={handleExportPdf}
+                  disabled={isExporting || isExportingPdf}
+                  className="flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.98] transition-all border border-blue-600 duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isExportingPdf ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>正在导出 PDF 图片...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>仅导出图片 PDF (一图一页)</span>
                     </>
                   )}
                 </button>

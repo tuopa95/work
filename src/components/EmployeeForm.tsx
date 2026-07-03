@@ -302,7 +302,7 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
       if (entry.amount <= 0) {
-        alert(`明细 #${i + 1} 的报销金额必须大于0元`);
+        alert(`明细 #${i + 1} 的报销金额必须大于 ¥0`);
         return;
       }
       if (entry.attachments.length === 0) {
@@ -518,7 +518,7 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
                     <div>
                       <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 flex items-center gap-1">
                         <DollarSign className="w-3 h-3 text-gray-400" />
-                        报销金额 (元) <span className="text-rose-500">*</span>
+                        报销金额 (¥) <span className="text-rose-500">*</span>
                       </label>
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs font-semibold">
