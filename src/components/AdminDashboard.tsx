@@ -17,9 +17,56 @@ import {
   CheckCircle,
   Loader2,
   X,
-  Trash2
+  Trash2,
+  Edit,
+  Plus
 } from 'lucide-react';
 import { ExpenseEntry, Feedback, Attachment } from '../types';
+
+const compressImage = (file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.7): Promise<{ base64: string; fileName: string }> => {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          } else {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve({ base64: event.target?.result as string, fileName: file.name });
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve({ base64: compressedBase64, fileName: file.name.replace(/\.[^/.]+$/, "") + ".jpg" });
+      };
+      img.onerror = () => {
+        resolve({ base64: event.target?.result as string, fileName: file.name });
+      };
+    };
+    reader.onerror = () => {
+      resolve({ base64: '', fileName: file.name });
+    };
+  });
+};
 
 const categories = [
   { value: 'invoice', label: '🧾 发票', color: 'bg-blue-500' },
@@ -56,6 +103,16 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
   const [updatingCategory, setUpdatingCategory] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  // Edit states for expense editing
+  const [editingExpense, setEditingExpense] = useState<ExpenseEntry | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editExpenseDate, setEditExpenseDate] = useState('');
+  const [editAmount, setEditAmount] = useState<string>('0');
+  const [editRemark, setEditRemark] = useState('');
+  const [editAttachments, setEditAttachments] = useState<Attachment[]>([]);
+  const [isUploadingEditAttachment, setIsUploadingEditAttachment] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Custom Confirmation & Alert Modals state
   const [confirmModal, setConfirmModal] = useState<{
@@ -100,6 +157,131 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       message,
       type
     });
+  };
+
+  const handleStartEdit = (entry: ExpenseEntry) => {
+    setEditingExpense(entry);
+    setEditName(entry.name);
+    setEditExpenseDate(entry.expense_date);
+    setEditAmount(entry.amount.toString());
+    setEditRemark(entry.remark);
+    setEditAttachments([...entry.attachments]);
+  };
+
+  const handleAddEditAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingEditAttachment(true);
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const { base64: compressedBase64, fileName: compressedName } = await compressImage(file);
+        if (!compressedBase64) continue;
+
+        let uploadedUrl = '';
+        try {
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: compressedName, base64: compressedBase64 })
+          });
+          const result = await res.json();
+          if (result.success) {
+            uploadedUrl = result.url;
+          } else {
+            console.warn('Edit upload failed, using local base64 fallback:', result.error);
+          }
+        } catch (error) {
+          console.warn('Edit upload network error, using local base64 fallback:', error);
+        }
+
+        const newAttachment: Attachment = {
+          id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          image_url: uploadedUrl || compressedBase64,
+          category: 'invoice', // default
+          fileName: compressedName,
+          base64: compressedBase64
+        };
+
+        setEditAttachments(prev => [...prev, newAttachment]);
+      }
+    } catch (err) {
+      console.error(err);
+      showAlert('上传失败', '处理图片凭证失败，请重试', 'error');
+    } finally {
+      setIsUploadingEditAttachment(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleUpdateEditAttachmentCategory = (attId: string, category: string) => {
+    setEditAttachments(prev => prev.map(att => {
+      if (att.id === attId) {
+        return { ...att, category };
+      }
+      return att;
+    }));
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingExpense) return;
+    if (!editName.trim()) {
+      showAlert('校验失败', '请输入报销人姓名', 'error');
+      return;
+    }
+    if (!editExpenseDate) {
+      showAlert('校验失败', '请选择消费日期', 'error');
+      return;
+    }
+    const amt = parseFloat(editAmount);
+    if (isNaN(amt) || amt < 0) {
+      showAlert('校验失败', '请输入合法的报销金额', 'error');
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const res = await fetch(`/api/admin/expense/${editingExpense.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          name: editName,
+          expense_date: editExpenseDate,
+          amount: amt,
+          remark: editRemark,
+          attachments: editAttachments
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setExpenses(prev => prev.map(entry => {
+          if (entry.id === editingExpense.id) {
+            return {
+              ...entry,
+              name: editName,
+              expense_date: editExpenseDate,
+              amount: amt,
+              remark: editRemark,
+              attachments: editAttachments
+            };
+          }
+          return entry;
+        }));
+        setEditingExpense(null);
+        showAlert('修改成功', '已成功更新报销明细记录！', 'success');
+      } else {
+        showAlert('修改失败', data.error || '更新记录失败', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showAlert('网络异常', '修改记录失败，网络异常', 'error');
+    } finally {
+      setIsSavingEdit(false);
+    }
   };
 
   const handleUpdateCategory = async (attachmentId: string, newCategory: string) => {
@@ -334,8 +516,11 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
             rawBase64 = att.base64.replace(/^data:image\/\w+;base64,/, '');
           } else {
             try {
-              // Fetch from the server on the fly
-              const res = await fetch(att.image_url);
+              // Fetch from the server on the fly with absolute URL
+              const targetUrl = att.image_url.startsWith('http')
+                ? att.image_url
+                : `${window.location.origin}${att.image_url}`;
+              const res = await fetch(targetUrl);
               if (res.ok) {
                 const blob = await res.blob();
                 rawBase64 = await new Promise<string>((resolve, reject) => {
@@ -409,7 +594,6 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
               return;
             }
 
-            const imageCid = `att_${att.id}`;
             const imgInfo = base64Map.get(att.id);
 
             if (!imgInfo || !imgInfo.rawBase64) {
@@ -419,10 +603,11 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                 </td>
               `;
             } else {
+              const base64DataUrl = `data:${imgInfo.mimeType};base64,${imgInfo.rawBase64}`;
               rowHtml += `
                 <td style="width: 140px; height: 140px; text-align: center; vertical-align: middle; border: 1px solid #cbd5e1; padding: 6px;">
                   <div style="width: 130px; height: 130px; display: flex; align-items: center; justify-content: center; margin: 0 auto; overflow: hidden;">
-                    <img src="${imageCid}" width="120" height="120" style="max-width: 120px; max-height: 120px; border-radius: 4px; border: 1px solid #e2e8f0; display: block; object-fit: contain; margin: 0 auto;" />
+                    <img src="${base64DataUrl}" width="120" height="120" style="max-width: 120px; max-height: 120px; border-radius: 4px; border: 1px solid #e2e8f0; display: block; object-fit: contain; margin: 0 auto;" />
                   </div>
                 </td>
               `;
@@ -440,7 +625,7 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
         }
       });
 
-      // 4. Build MHTML Template
+      // 4. Build Excel HTML Template with Embedded Base64 Images
       const htmlTemplate = `
         <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
         <head>
@@ -511,44 +696,6 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
         </html>
       `;
 
-      // Define MIME boundary
-      const boundary = '----=_NextPart_AI_REIMBURSEMENT';
-      const joinLines = (lines: string[]) => lines.join('\r\n');
-
-      const parts: string[] = [];
-
-      // MHTML Header
-      parts.push('MIME-Version: 1.0');
-      parts.push(`Content-Type: multipart/related; boundary="${boundary}"`);
-      parts.push(''); // blank line after outer headers
-
-      // HTML text part
-      parts.push(`--${boundary}`);
-      parts.push('Content-Type: text/html; charset="utf-8"');
-      parts.push('Content-Location: main.html');
-      parts.push(''); // blank line before HTML body
-      parts.push(htmlTemplate);
-      parts.push('');
-
-      // Add each attachment as a base64 MIME part
-      allAttachments.forEach(att => {
-        const imgInfo = base64Map.get(att.id);
-        if (imgInfo && imgInfo.rawBase64) {
-          parts.push(`--${boundary}`);
-          parts.push(`Content-Type: ${imgInfo.mimeType}`);
-          parts.push('Content-Transfer-Encoding: base64');
-          parts.push(`Content-Location: att_${att.id}`);
-          parts.push(''); // blank line before base64 body
-          parts.push(imgInfo.rawBase64);
-          parts.push('');
-        }
-      });
-
-      // Closing boundary
-      parts.push(`--${boundary}--`);
-
-      const mhtmlString = joinLines(parts);
-      
       // Calculate dates and total amount for custom naming
       const expenseDates = filteredExpenses
         .map(e => e.expense_date)
@@ -572,7 +719,8 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
       const amountStr = `¥${totalSum.toFixed(2)}`;
       const fileName = `团队报销汇总_${dateStr}_${amountStr}.xls`;
 
-      const blob = new Blob([mhtmlString], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+      // Create a blob directly from the HTML template containing inline Base64 data URIs
+      const blob = new Blob([htmlTemplate], { type: 'application/vnd.ms-excel;charset=utf-8;' });
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.href = url;
@@ -1194,14 +1342,24 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                           </div>
                         </td>
                         <td className="px-6 py-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteExpense(entry.id)}
-                            className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-xl transition-all border border-rose-100 dark:border-rose-900/10 cursor-pointer shadow-sm hover:scale-105 active:scale-95"
-                            title="删除此记录"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEdit(entry)}
+                              className="p-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/20 dark:hover:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-xl transition-all border border-blue-100 dark:border-blue-900/10 cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                              title="编辑此记录"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteExpense(entry.id)}
+                              className="p-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-xl transition-all border border-rose-100 dark:border-rose-900/10 cursor-pointer shadow-sm hover:scale-105 active:scale-95"
+                              title="删除此记录"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1283,6 +1441,14 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
                               <span className="font-mono font-bold text-slate-900 dark:text-white text-[15px]">
                                 ¥{item.amount.toFixed(2)}
                               </span>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEdit(item)}
+                                className="p-1.5 text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition-colors cursor-pointer border border-transparent hover:border-blue-100 dark:hover:border-blue-900/30 shadow-sm"
+                                title="编辑此记录"
+                              >
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteExpense(item.id)}
@@ -1368,6 +1534,212 @@ export default function AdminDashboard({ token, onLogout }: AdminDashboardProps)
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* EDIT EXPENSE MODAL */}
+      {editingExpense && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-150 dark:border-zinc-850 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-900/50">
+              <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+                <Edit className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>编辑报销明细记录</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingExpense(null)}
+                className="bg-slate-100 hover:bg-slate-200 dark:bg-zinc-855 dark:hover:bg-zinc-800 text-slate-700 dark:text-slate-300 rounded-full p-1.5 transition-colors cursor-pointer"
+                title="关闭"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Form Content */}
+            <div className="p-6 space-y-4 flex-1 overflow-y-auto">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Claimant */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-zinc-400">
+                    报销人 <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/85 shadow-sm transition-all h-[36px]"
+                    placeholder="请输入报销人姓名"
+                  />
+                </div>
+
+                {/* Expense Date */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-zinc-400">
+                    消费日期 <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={editExpenseDate}
+                    onChange={e => setEditExpenseDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/85 shadow-sm transition-all h-[36px]"
+                  />
+                </div>
+
+                {/* Amount */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-zinc-400">
+                    报销金额 (¥) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={editAmount}
+                    onChange={e => setEditAmount(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/85 shadow-sm transition-all h-[36px] font-mono"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                {/* Remark */}
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-zinc-400">
+                    备注/用途说明
+                  </label>
+                  <textarea
+                    value={editRemark}
+                    onChange={e => setEditRemark(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500/85 shadow-sm transition-all min-h-[64px]"
+                    placeholder="例：工作日加班打车、餐饮等..."
+                  />
+                </div>
+              </div>
+
+              {/* Attachments Section */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-zinc-300">
+                    凭证附件管理 ({editAttachments.length} 张)
+                  </label>
+
+                  {/* Add attachment button */}
+                  <div className="relative">
+                    <input
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      id="edit-attachment-upload"
+                      className="hidden"
+                      onChange={handleAddEditAttachment}
+                      disabled={isUploadingEditAttachment}
+                    />
+                    <label
+                      htmlFor="edit-attachment-upload"
+                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:hover:bg-blue-950/50 text-blue-600 dark:text-blue-400 font-extrabold text-[11px] rounded-xl cursor-pointer border border-blue-100 dark:border-blue-900/30 shadow-sm transition-all select-none"
+                    >
+                      {isUploadingEditAttachment ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>处理中...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>添加新凭证</span>
+                        </>
+                      )}
+                    </label>
+                  </div>
+                </div>
+
+                {/* Current Attachments List inside Edit Modal */}
+                {editAttachments.length === 0 ? (
+                  <div className="p-6 border border-dashed border-slate-250 dark:border-zinc-800 rounded-xl text-center text-slate-400 text-xs">
+                    暂无凭证图片。可点击右上方“添加新凭证”上传。
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3">
+                    {editAttachments.map(att => (
+                      <div
+                        key={att.id}
+                        className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-3 border border-slate-150 dark:border-zinc-850 rounded-xl bg-slate-50/50 dark:bg-zinc-950/40 gap-3"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-white flex-shrink-0 flex items-center justify-center">
+                            <img
+                              src={att.image_url}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-mono text-slate-700 dark:text-zinc-300 truncate max-w-[200px]" title={att.fileName}>
+                              {att.fileName}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Category selection and Delete inside Edit Modal */}
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto justify-end">
+                          <select
+                            value={att.category}
+                            onChange={e => handleUpdateEditAttachmentCategory(att.id, e.target.value)}
+                            className="text-[10px] font-bold px-2.5 py-1 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          >
+                            {categories.map(cat => (
+                              <option key={cat.value} value={cat.value}>
+                                {cat.label}
+                              </option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={() => setEditAttachments(prev => prev.filter(x => x.id !== att.id))}
+                            className="p-1.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-lg border border-rose-100 dark:border-rose-900/10 cursor-pointer shadow-sm hover:scale-105 transition-all"
+                            title="删除此凭证"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-6 py-4 border-t border-slate-150 dark:border-zinc-850 flex items-center justify-end gap-3 bg-slate-50/50 dark:bg-zinc-900/50">
+              <button
+                type="button"
+                onClick={() => setEditingExpense(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={isSavingEdit}
+                onClick={handleSaveEdit}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98 cursor-pointer flex items-center gap-1"
+              >
+                {isSavingEdit ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>正在保存...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>确定</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

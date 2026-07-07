@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Upload, Plus, Trash2, Send, MessageSquare, Check, Loader2, DollarSign, Calendar, FileText, CheckCircle, X } from 'lucide-react';
+import { Upload, Plus, Trash2, Send, MessageSquare, Check, Loader2, DollarSign, Calendar, FileText, CheckCircle, X, ZoomIn, Copy, Undo } from 'lucide-react';
 import { Attachment, ExpenseEntry } from '../types';
 
 const compressImage = (file: File, maxWidth = 1000, maxHeight = 1000, quality = 0.7): Promise<{ base64: string; fileName: string }> => {
@@ -74,6 +74,9 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
   const [submittingFeedback, setSubmittingFeedback] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewImageName, setPreviewImageName] = useState<string>('');
+  const [lastDeleted, setLastDeleted] = useState<{ entry: ExpenseEntry; index: number } | null>(null);
 
   // Load draft or initialize with one empty entry
   useEffect(() => {
@@ -257,10 +260,20 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
   // Add a new empty entry row
   const addEntry = () => {
     const newId = `entry-${Date.now()}`;
+    
+    // Smart Date Inheritance: Inherit date from the active entry or the last entry
+    let defaultDate = new Date().toISOString().split('T')[0];
+    const activeEntry = entries.find(e => e.id === activeEntryId);
+    if (activeEntry && activeEntry.expense_date) {
+      defaultDate = activeEntry.expense_date;
+    } else if (entries.length > 0) {
+      defaultDate = entries[entries.length - 1].expense_date;
+    }
+
     const newEntry: ExpenseEntry = {
       id: newId,
       name: '',
-      expense_date: new Date().toISOString().split('T')[0],
+      expense_date: defaultDate,
       amount: 0,
       remark: '',
       attachments: []
@@ -269,14 +282,67 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
     setActiveEntryId(newId);
   };
 
-  // Remove an entry
+  // Duplicate/Add an entry under the same consumption date
+  const duplicateEntry = (entryId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const source = entries.find(item => item.id === entryId);
+    if (!source) return;
+
+    const newId = `entry-${Date.now()}`;
+    const duplicated: ExpenseEntry = {
+      id: newId,
+      name: '',
+      expense_date: source.expense_date, // Only inherit date
+      amount: 0, // Do not copy amount
+      remark: '', // Do not copy remark
+      attachments: [] // Do not copy attachments
+    };
+
+    // Find the index of source item to insert right after it
+    const index = entries.findIndex(item => item.id === entryId);
+    setEntries(prev => {
+      const copy = [...prev];
+      copy.splice(index + 1, 0, duplicated);
+      return copy;
+    });
+    setActiveEntryId(newId);
+  };
+
+  // Remove an entry with Undo capability
   const removeEntry = (entryId: string) => {
     if (entries.length <= 1) return;
+    
+    const index = entries.findIndex(item => item.id === entryId);
+    if (index === -1) return;
+    const entryToDelete = entries[index];
+
+    // Save to lastDeleted stack
+    setLastDeleted({ entry: entryToDelete, index });
+
     setEntries(prev => prev.filter(item => item.id !== entryId));
     if (activeEntryId === entryId) {
       const remaining = entries.filter(item => item.id !== entryId);
       setActiveEntryId(remaining[0]?.id || '');
     }
+  };
+
+  // Undo the last deleted item
+  const handleUndoDelete = () => {
+    if (!lastDeleted) return;
+    const { entry, index } = lastDeleted;
+
+    setEntries(prev => {
+      const copy = [...prev];
+      if (index >= 0 && index <= copy.length) {
+        copy.splice(index, 0, entry);
+      } else {
+        copy.push(entry);
+      }
+      return copy;
+    });
+
+    setActiveEntryId(entry.id);
+    setLastDeleted(null);
   };
 
   // Update specific field in an entry
@@ -484,14 +550,27 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
               <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
               02 / 填写报销明细 ({entries.length} 笔)
             </h2>
-            <button
-              type="button"
-              onClick={addEntry}
-              className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:underline px-2.5 py-1 rounded-lg hover:bg-blue-50/50 dark:hover:bg-blue-950/40 transition-all"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              添加一条明细
-            </button>
+            <div className="flex items-center gap-3">
+              {lastDeleted && (
+                <button
+                  type="button"
+                  onClick={handleUndoDelete}
+                  className="flex items-center gap-1.5 text-xs font-extrabold text-amber-600 dark:text-amber-400 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/45 px-3 py-1 rounded-lg border border-amber-200/30 dark:border-amber-900/20 transition-all cursor-pointer shadow-sm active:scale-95 animate-in fade-in slide-in-from-right-3 duration-200"
+                  title="恢复上一步删除的明细"
+                >
+                  <Undo className="w-3.5 h-3.5" />
+                  <span>撤销上一步删除</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={addEntry}
+                className="flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 hover:underline px-2.5 py-1 rounded-lg hover:bg-blue-50/50 dark:hover:bg-blue-950/40 transition-all"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                添加一条明细
+              </button>
+            </div>
           </div>
 
           <div className="space-y-6">
@@ -528,19 +607,31 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
                       )}
                     </div>
 
-                    {entries.length > 1 && (
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removeEntry(entryId);
-                        }}
-                        className="text-gray-400 dark:text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400 p-1 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
-                        title="删除此项明细"
+                        onClick={(e) => duplicateEntry(entryId, e)}
+                        className="text-gray-400 dark:text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-955/20 transition-all flex items-center gap-1 text-[10px] font-extrabold cursor-pointer border border-transparent hover:border-blue-100 dark:hover:border-blue-900/10 shadow-sm"
+                        title="同日追加一条新明细（仅继承消费日期，不复制金额与凭证）"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Copy className="w-3 h-3" />
+                        <span>同日追加明细</span>
                       </button>
-                    )}
+
+                      {entries.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeEntry(entryId);
+                          }}
+                          className="text-gray-400 dark:text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400 p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                          title="删除此项明细"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {/* Input Rows */}
@@ -558,6 +649,33 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
                         onChange={e => updateEntryField(entryId, 'expense_date', e.target.value)}
                         className="w-full px-3.5 py-2 rounded-xl border border-gray-200/80 dark:border-zinc-800 bg-white dark:bg-[#121214] text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-xs font-medium"
                       />
+                      {/* Entered Date Chips for Same-Date Addition Convenience */}
+                      {(() => {
+                        const enteredDates = Array.from(new Set(
+                          entries
+                            .map(e => e.expense_date)
+                            .filter(d => d && d !== item.expense_date)
+                        ));
+                        if (enteredDates.length === 0) return null;
+                        return (
+                          <div className="mt-1.5 flex flex-wrap gap-1.5 items-center">
+                            <span className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold select-none">
+                              快捷应用已有日期：
+                            </span>
+                            {enteredDates.map(date => (
+                              <button
+                                key={date}
+                                type="button"
+                                onClick={() => updateEntryField(entryId, 'expense_date', date)}
+                                className="px-2 py-0.5 text-[10px] font-bold bg-white hover:bg-blue-50 hover:text-blue-600 dark:bg-zinc-850 dark:hover:bg-blue-950/40 dark:hover:text-blue-400 text-slate-600 dark:text-zinc-400 rounded-lg transition-all border border-slate-200 hover:border-blue-200 dark:border-zinc-700/80 dark:hover:border-blue-900/40 cursor-pointer shadow-sm active:scale-95 select-none"
+                                title="点击应用此消费日期"
+                              >
+                                {date}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* Amount */}
@@ -671,19 +789,29 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
                             className="group/att relative border border-gray-150 dark:border-zinc-850 rounded-xl overflow-hidden bg-gray-50 dark:bg-[#121214] p-1.5 flex flex-col justify-between"
                           >
                             {/* Thumbnail view */}
-                            <div className="aspect-video w-full rounded-lg overflow-hidden bg-white border border-gray-100 dark:border-zinc-800 flex items-center justify-center relative">
+                            <div
+                              onClick={() => {
+                                setPreviewImage(att.image_url);
+                                setPreviewImageName(att.fileName);
+                              }}
+                              className="aspect-video w-full rounded-lg overflow-hidden bg-white border border-gray-100 dark:border-zinc-800 flex items-center justify-center relative cursor-zoom-in hover:opacity-95 transition-all group-hover/att:shadow-inner"
+                            >
                               <img
                                 src={att.image_url}
                                 alt="attachment preview"
                                 className="object-contain w-full h-full"
                               />
+                              {/* Hover zoom icon */}
+                              <div className="absolute inset-0 bg-black/25 opacity-0 group-hover/att:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                                <ZoomIn className="w-4 h-4 text-white drop-shadow-md" />
+                              </div>
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   deleteAttachment(entryId, att.id);
                                 }}
-                                className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white rounded-full p-1 opacity-0 group-hover/att:opacity-100 transition-opacity shadow-md"
+                                className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white rounded-full p-1 opacity-0 group-hover/att:opacity-100 transition-opacity shadow-md pointer-events-auto z-10"
                               >
                                 <XIcon className="w-3 h-3" />
                               </button>
@@ -917,6 +1045,83 @@ export default function EmployeeForm({ onSuccess }: EmployeeFormProps) {
               >
                 好的，我知道了
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Full Screen Image Preview Modal */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-4"
+          onClick={() => {
+            setPreviewImage(null);
+            setPreviewImageName('');
+          }}
+        >
+          {/* Main Card */}
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-2xl border border-slate-200 dark:border-zinc-800 shadow-2xl max-w-3xl w-full flex flex-col overflow-hidden max-h-[90vh] animate-in fade-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="px-5 py-3.5 border-b border-slate-100 dark:border-zinc-800/80 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-950/20">
+              <div className="min-w-0">
+                <h3 className="text-xs font-black text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
+                  凭证图片预览
+                </h3>
+                <p className="text-xs font-bold text-slate-800 dark:text-white truncate max-w-[280px] sm:max-w-md mt-0.5 font-mono" title={previewImageName}>
+                  {previewImageName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewImage(null);
+                  setPreviewImageName('');
+                }}
+                className="bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-slate-300 rounded-full p-1.5 transition-colors cursor-pointer"
+                title="关闭"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Image Viewer body */}
+            <div className="p-4 bg-slate-950 flex items-center justify-center flex-1 overflow-auto min-h-[250px] md:min-h-[400px]">
+              <img
+                src={previewImage}
+                alt={previewImageName || 'Receipt credential preview'}
+                className="object-contain max-w-full max-h-[60vh] rounded-lg shadow-lg select-none"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            {/* Footer with actions */}
+            <div className="px-5 py-3 border-t border-slate-150 dark:border-zinc-850 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-950/20 text-xs">
+              <span className="text-slate-400 dark:text-zinc-500 font-medium">
+                双击或使用手势可缩放大图
+              </span>
+              <div className="flex gap-2">
+                <a
+                  href={previewImage}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-950/60 text-blue-600 dark:text-blue-400 font-bold rounded-lg border border-blue-100/40 dark:border-blue-900/20 transition-all active:scale-95"
+                >
+                  查看原图 ↗
+                </a>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewImage(null);
+                    setPreviewImageName('');
+                  }}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-slate-300 font-bold rounded-lg transition-all active:scale-95 cursor-pointer"
+                >
+                  关闭
+                </button>
+              </div>
             </div>
           </div>
         </div>

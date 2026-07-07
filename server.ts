@@ -355,6 +355,55 @@ app.patch('/api/admin/attachment/:id/category', requireAdmin, (req, res) => {
   }
 });
 
+// 10. Admin UPDATE an entire expense record
+app.put('/api/admin/expense/:id', requireAdmin, (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, expense_date, amount, remark, attachments } = req.body;
+
+    if (!name || !expense_date || amount === undefined) {
+      res.status(400).json({ success: false, error: '缺少必填字段（姓名、日期或金额）' });
+      return;
+    }
+
+    if (!fs.existsSync(EXPENSES_FILE)) {
+      res.status(404).json({ success: false, error: '未找到报销数据文件' });
+      return;
+    }
+
+    const current = JSON.parse(fs.readFileSync(EXPENSES_FILE, 'utf-8'));
+    let found = false;
+    let updatedEntry: any = null;
+
+    const updated = current.map((entry: any) => {
+      if (entry && entry.id && entry.id.toString().trim() === id.toString().trim()) {
+        found = true;
+        updatedEntry = {
+          ...entry,
+          name,
+          expense_date,
+          amount: Number(amount),
+          remark: remark || '',
+          attachments: Array.isArray(attachments) ? attachments : entry.attachments || []
+        };
+        return updatedEntry;
+      }
+      return entry;
+    });
+
+    if (!found) {
+      res.status(404).json({ success: false, error: '未找到该报销记录' });
+      return;
+    }
+
+    fs.writeFileSync(EXPENSES_FILE, JSON.stringify(updated, null, 2), 'utf-8');
+    res.json({ success: true, data: updatedEntry });
+  } catch (err: any) {
+    console.error('Update expense error:', err);
+    res.status(500).json({ success: false, error: err.message || '修改报销记录失败' });
+  }
+});
+
 // Vite Dev Server / Static Middleware configuration
 const startServer = async () => {
   const distPath = path.join(process.cwd(), 'dist');
